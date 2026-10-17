@@ -338,12 +338,24 @@ footer{max-width:1000px;margin:0 auto;padding:0 24px 40px}
         <div class="cs-head">
           <div class="badge g">⭐ Recomendado</div>
           <h2>Financiar pela Caixa Econômica</h2>
-          <p>Menor desembolso · banco cobre 75% · entrada fixa 10%</p>
+          <p>Menor desembolso · banco cobre até 75% · entrada livre</p>
         </div>
-        <div class="cr"><span class="cr-l">Entrada (10%) em 4 parcelas</span><span class="cr-v" id="f-ent">—</span></div>
         <div class="cr" style="align-items:center">
           <span class="cr-l">
-            40 mensais à construtora <span class="incc-tag">corrige INCC</span><br>
+            Entrada em 4 parcelas
+            <span class="step-hint">25% ou mais = sem parcelas à construtora</span>
+          </span>
+          <span class="cr-edit" style="gap:4px">
+            <input id="f-ent-pct" type="text" inputmode="numeric" onchange="onEntFinEdit(this)" placeholder="10"
+              style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:700;color:var(--black);border:none;border-bottom:2px solid var(--green);outline:none;width:50px;text-align:right;background:transparent;padding-bottom:2px">
+            <span style="font-family:'Barlow Condensed',sans-serif;font-size:18px;color:var(--gray-lt)">%</span>
+            <span style="font-size:13px;color:var(--gray);margin-left:8px">=</span>
+            <span class="cr-v" id="f-ent" style="margin-left:4px">—</span>
+          </span>
+        </div>
+        <div class="cr" style="align-items:center">
+          <span class="cr-l">
+            <span id="f-parc-lbl">40 mensais à construtora</span> <span class="incc-tag" id="f-parc-incc">corrige INCC</span><br>
             <span style="font-size:11px;color:var(--gray-lt)" id="f-banco-label">15% construtora · 75% banco</span>
           </span>
           <span class="cr-edit" style="flex-direction:column;align-items:flex-end;gap:2px">
@@ -529,7 +541,7 @@ footer{max-width:1000px;margin:0 auto;padding:0 24px 40px}
             <h3>Financiar Caixa</h3>
             <p>Banco cobre 75%</p>
           </div>
-          <div class="r"><span class="r-l">Entrada (10%)</span><span class="r-v" id="c-f-ent">—</span></div>
+          <div class="r"><span class="r-l" id="c-f-ent-lbl">Entrada (10%)</span><span class="r-v" id="c-f-ent">—</span></div>
           <div class="r"><span class="r-l">Mensais 40× <span class="incc-tag">INCC</span></span><span class="r-v" id="c-f-men">—</span></div>
           <div class="opt-acomp">
             <div class="al">Acomp. obra — Caixa</div>
@@ -645,7 +657,21 @@ S("hdr-meses", MESES);
 var _parcMesGlobal = -1;
 var _valorRefGlobal = -1;
 var _entPctGlobal = -1;
-var _parcFinGlobal = -1; // -1 = nunca editado (usa padrão 15%/40)
+var _parcFinGlobal = -1; // -1 = nunca editado (usa o mínimo: banco cobre 75%)
+var _entFinGlobal = -1;  // -1 = nunca editado (padrão 10%); 0 a 0.80 = entrada livre do financiado
+
+// Parâmetros do financiado: entrada livre + parcela à construtora (mínimo fecha 25% de recurso próprio, banco ≤ 75%)
+function finParams(val) {
+  const entPct = _entFinGlobal === -1 ? 0.10 : _entFinGlobal;
+  const entF = val * entPct;
+  const parcFmin = Math.max(0, Math.round(val*(0.25-entPct)/40)); // mínimo: banco cobre no máx. 75%
+  const parcFmax = Math.max(parcFmin, Math.round(val*(0.80-entPct)/40)); // máximo: banco cobre no mín. 20%
+  const parcFin = Math.max(parcFmin, Math.min(parcFmax, _parcFinGlobal === -1 ? parcFmin : _parcFinGlobal));
+  const construtoraPct = parcFin * 40 / val;
+  const bancoPct = Math.max(0.20, 1 - entPct - construtoraPct);
+  const cef = Math.round(val * bancoPct);
+  return { entPct, entF, parcFmin, parcFmax, parcFin, construtoraPct, bancoPct, cef };
+}
 var _valAnterior = 0;
 
 // ── Tabs ──
@@ -721,6 +747,15 @@ function onParcFinEdit(el) {
   const n = parseInt(el.value.replace(/\./g,"").replace(/[^0-9]/g,""))||0;
   el.value = n.toLocaleString("pt-BR");
   _parcFinGlobal = n;
+  calc();
+}
+
+function onEntFinEdit(el) {
+  const raw = el.value.replace(/[^0-9]/g,"");
+  const n = raw ? Math.min(parseInt(raw), 80) : 10;
+  el.value = n;
+  _entFinGlobal = n/100;
+  _parcFinGlobal = -1; // parcela volta ao mínimo da nova entrada
   calc();
 }
 
@@ -828,7 +863,7 @@ function calc() {
 
   // Reset ao mudar imóvel
   if(val!==_valAnterior) {
-    _parcMesGlobal=-1; _valorRefGlobal=-1; _entPctGlobal=-1; _parcFinGlobal=-1;
+    _parcMesGlobal=-1; _valorRefGlobal=-1; _entPctGlobal=-1; _parcFinGlobal=-1; _entFinGlobal=-1;
     _valAnterior=val;
     const pe=gi("d-parc-edit"), re=gi("d-ref-edit"), ep=gi("d-ent-pct");
     if(pe) pe.value=""; if(re) re.value=""; if(ep) ep.value="10";
@@ -922,35 +957,29 @@ function calc() {
   S("d-real",   Pp(tirDr));
 
   // ── Fluxo FINANCIADO ──
-  const entF = val * 0.10;
-  const parcFmin = Math.round(val*0.15/40); // mínimo: banco 75%
-  const parcFmax = Math.round(val*0.70/40); // máximo: banco 20%
-  const parcFsug = parcFmin; // sugestão padrão
+  const fp = finParams(val);
+  const { entPct: entFPct, entF, parcFmin, parcFmax, parcFin, construtoraPct, bancoPct, cef } = fp;
 
-  // Preenche campo com sugestão se nunca editado ou se imóvel mudou
+  // Preenche campos com sugestão se nunca editados ou se imóvel mudou
+  const entFinEl = gi("f-ent-pct");
+  if(entFinEl && _entFinGlobal === -1) entFinEl.value = "10";
   const parcFinEl = gi("f-parc-edit");
   if(parcFinEl) {
     if(_parcFinGlobal === -1) {
-      parcFinEl.value = parcFsug.toLocaleString("pt-BR");
+      parcFinEl.value = parcFmin.toLocaleString("pt-BR");
     }
     // Valida limites e mostra aviso
     const parcFinErroEl = gi("f-parc-erro");
-    const parcFinAtual = _parcFinGlobal === -1 ? parcFsug : _parcFinGlobal;
-    const constPct = parcFinAtual * 40 / val;
-    const bancoPct = 0.90 - constPct;
+    const parcFinAtual = _parcFinGlobal === -1 ? parcFmin : _parcFinGlobal;
+    const bancoPctBruto = 1 - entFPct - parcFinAtual * 40 / val;
     if(parcFinAtual < parcFmin) {
       if(parcFinErroEl) { parcFinErroEl.textContent="⚠️ Parcela abaixo do mínimo · banco ultrapassaria 75% · mínimo "+R(parcFmin)+"/mês"; parcFinErroEl.style.display="block"; }
-    } else if(bancoPct < 0.20 - 0.001) {
+    } else if(bancoPctBruto < 0.20 - 0.001) {
       if(parcFinErroEl) { parcFinErroEl.textContent="⚠️ Parcela muito alta · banco ficaria abaixo de 20% · máximo "+R(parcFmax)+"/mês"; parcFinErroEl.style.display="block"; }
     } else {
       if(parcFinErroEl) parcFinErroEl.style.display="none";
     }
   }
-
-  const parcFin = Math.max(parcFmin, Math.min(parcFmax, _parcFinGlobal === -1 ? parcFsug : _parcFinGlobal));
-  const construtoraPct = parcFin * 40 / val;
-  const bancoPct = Math.max(0.20, 0.90 - construtoraPct);
-  const cef = Math.round(val * bancoPct);
 
   let totMF=0,totAc=0,ac1=0,ac30=0;
   const incC=(1-0.30)/30; let sC=cef*0.30;
@@ -981,7 +1010,9 @@ function calc() {
   S("f-real", Pp(tirFr));
   // Sugestão e hint
   S("f-parc-sug", "mín: "+R(parcFmin)+" · máx: "+R(parcFmax));
-  S("f-banco-label", Math.round(bancoPct*100)+"% banco · "+Math.round(construtoraPct*100)+"% construtora");
+  S("f-banco-label", Math.round(bancoPct*100)+"% banco · "+Math.round(construtoraPct*100)+"% construtora · "+Math.round(entFPct*100)+"% entrada");
+  S("f-parc-lbl", parcFin>0 ? "40 mensais à construtora" : "Sem parcelas à construtora");
+  const incTag=gi("f-parc-incc"); if(incTag) incTag.style.display = parcFin>0 ? "" : "none";
 
   // ── Fluxo SELIC ──
   let saldoB=0, totAplic=ent+custosD;
@@ -1054,8 +1085,8 @@ function calc() {
     refD:gi("d-ref-edit")?gi("d-ref-edit").value:"—",
     e30D:R(entrega30), cusD:R(custosD), totD:Rfloor(totDReal),
     lucF:R(lucF), pctF:"· +"+Math.round(lucF/totF*100)+"%", vsF:msgVsSelic(vezesFinanc, lucF),
-    tirF:Pp(tirFa), realF:Pp(tirFr), entF:R(val*0.10)+" · 4× "+R(val*0.10/4),
-    menF:"~"+R(parcFin)+"/mês ("+Math.round(construtoraPct*100)+"%)", ac1F:"aprox. "+R(ac1)+"/mês", ac2F:"até aprox. "+R(ac30)+"/mês",
+    tirF:Pp(tirFa), realF:Pp(tirFr), entF:R(entF)+" · 4× "+R(entF/4), entLblF:"Entrada ("+Math.round(entFPct*100)+"%)",
+    menF:parcFin>0 ? "~"+R(parcFin)+"/mês ("+Math.round(construtoraPct*100)+"%)" : "sem parcelas", ac1F:"aprox. "+R(ac1)+"/mês", ac2F:"até aprox. "+R(ac30)+"/mês",
     cefF:R(cef), cusF:R(itbiF+regF+mipDfi), totF:Rfloor(totF),
     totS:Rfloor(totDReal),
     brutoS:R(saldoB), irS:"− "+R(ir), lucS:R(ganhoL),
@@ -1073,7 +1104,7 @@ function updateComparativo(d) {
   set("c-d-luc", d.lucD); set("c-d-vs", d.vsD);
   set("c-d-tir", d.tirD); set("c-d-real", d.realD);
   // Financiado
-  set("c-f-ent", d.entF); set("c-f-men", d.menF);
+  set("c-f-ent", d.entF); set("c-f-ent-lbl", d.entLblF); set("c-f-men", d.menF);
   set("c-f-ac1", d.ac1F); set("c-f-ac2", d.ac2F);
   set("c-f-cef", d.cefF); set("c-f-cus", d.cusF);
   set("c-f-tot", d.totF); set("c-f-luc", d.lucF);
@@ -1095,15 +1126,9 @@ function enviarWhats() {
   const infl40=(1+Math.pow(1+0.0491,8/12)-1)*(1+0.04)*(1+0.0364)*(1+Math.pow(1+0.035,8/12)-1)-1;
   const vE=val*Math.pow(1+aa,40/12)*(1+infl40);
 
-  // Financiado (padrão 15%/40 ou parcela editada)
-  const entF=val*0.10;
+  // Financiado (entrada e parcela da construtora conforme editado no simulador)
+  const { entF, parcFin, cef: cefW } = finParams(val);
   const custosF_w=545+val*0.003+1000+val*0.75*0.00021*30+val*0.000034*30;
-  const parcFinEl=gi("f-parc-edit");
-  const parcFminCalc=Math.round(val*0.15/40);
-  const parcFin=parcFinEl&&parcFinEl.value?parseInt(parcFinEl.value.replace(/\./g,"").replace(/[^0-9]/g,""))||parcFminCalc:parcFminCalc;
-  const construtoraPct=parcFin*40/val;
-  const bancoPctW=Math.max(0.20, 0.90-construtoraPct);
-  const cefW=Math.round(val*bancoPctW);
   const incC=(1-0.30)/30; let sC=cefW*0.30,totMF=0,totAc=0;
   const fFw=new Array(41).fill(0); fFw[0]=-(entF+custosF_w);
   for(let m=1;m<=40;m++){
@@ -1166,14 +1191,7 @@ function enviarWhatsFin() {
   const incc=0.005, igpm=0.007;
   const infl40=(1+Math.pow(1+0.0491,8/12)-1)*(1+0.04)*(1+0.0364)*(1+Math.pow(1+0.035,8/12)-1)-1;
   const vE=val*Math.pow(1+aa,40/12)*(1+infl40);
-  const entF=val*0.10;
-
-  const parcFinEl=gi("f-parc-edit");
-  const parcFminCalc=Math.round(val*0.15/40);
-  const parcFin=parcFinEl&&parcFinEl.value?parseInt(parcFinEl.value.replace(/\./g,"").replace(/[^0-9]/g,""))||parcFminCalc:parcFminCalc;
-  const construtoraPct=parcFin*40/val;
-  const bancoPctCalc=Math.max(0.20, 0.90-construtoraPct);
-  const cefCalc=Math.round(val*bancoPctCalc);
+  const { entPct: entFPct, entF, parcFin, bancoPct: bancoPctCalc, cef: cefCalc } = finParams(val);
   const custosF_total=545+val*0.003+1000+val*0.75*0.00021*30+val*0.000034*30;
 
   const incC=(1-0.30)/30; let sC=cefCalc*0.30,totMF=0,totAc=0;
@@ -1192,8 +1210,10 @@ function enviarWhatsFin() {
   const acomp2=Math.round(cefCalc*0.008);
   const msg=saudacao+"fiz uma simulação para você ter uma ideia de como funciona a compra de uma unidade financiada pela Caixa.\n\n"
     +"*Valor do imóvel:* "+Rsmart(val)+"\n\n"
-    +"*Entrada:* aproximadamente 10%, em 4 parcelas de "+Rsmart(entF/4)+"\n\n"
-    +"*Durante a obra:* cerca de 40 parcelas de "+Rsmart(parcF)+"/mês, com correção pelo INCC + acompanhamento de obra Caixa (começa em aprox. "+Rsmart(acomp1)+"/mês e cresce conforme a obra avança)\n\n"
+    +"*Entrada:* aproximadamente "+Math.round(entFPct*100)+"%, em 4 parcelas de "+Rsmart(entF/4)+"\n\n"
+    +(parcF>0
+      ? "*Durante a obra:* cerca de 40 parcelas de "+Rsmart(parcF)+"/mês, com correção pelo INCC + acompanhamento de obra Caixa (começa em aprox. "+Rsmart(acomp1)+"/mês e cresce conforme a obra avança)\n\n"
+      : "*Durante a obra:* sem parcelas à construtora, apenas o acompanhamento de obra Caixa (começa em aprox. "+Rsmart(acomp1)+"/mês e cresce conforme a obra avança)\n\n")
     +"*Na entrega:* cerca de "+bancoLabel+"% do valor do imóvel é financiado pela Caixa\n\n"
     +"Considerando a valorização esperada do empreendimento, a estimativa é que o imóvel possa valer em torno de *"+Rsmart(vE)+"* na entrega, representando um ganho patrimonial potencial próximo de *"+Rsmart(lucF)+"*.\n\n"
     +"Quer que eu monte uma simulação personalizada de acordo com a sua renda e valor de entrada?";
