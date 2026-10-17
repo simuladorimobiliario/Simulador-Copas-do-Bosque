@@ -380,7 +380,7 @@ footer{max-width:1000px;margin:0 auto;padding:0 24px 40px}
           <span class="tl">Total investimento próprio</span>
           <span class="tv g" id="f-tot">—</span>
         </div>
-        <div class="cs-nota">* ITBI sobre fração ideal do terreno (R$ 54.545 = R$ 1.200.000 ÷ 22 unidades) + Registro SFH/Avaliação + Seguros MIP/DFI ao longo dos 30 meses de obra</div>
+        <div class="cs-nota">* ITBI sobre fração ideal do terreno (R$ 54.545 = R$ 1.200.000 ÷ 22 unidades) + Registro SFH/Avaliação + Seguros MIP/DFI. Acompanhamento de obra: 0,8%/mês sobre o saldo liberado, partindo de 35% de obra pronta na assinatura até a entrega</div>
         <div class="cs-lucro">
           <div class="ll">Lucro estimado na venda</div>
           <div><span class="lv" id="f-luc">—</span><span class="lpct" id="f-pct">—</span></div>
@@ -671,6 +671,20 @@ function finParams(val) {
   const bancoPct = Math.max(0.20, 1 - entPct - construtoraPct);
   const cef = Math.round(val * bancoPct);
   return { entPct, entF, parcFmin, parcFmax, parcFin, construtoraPct, bancoPct, cef };
+}
+
+// Acompanhamento de obra Caixa: 0,8%/mês sobre o saldo liberado, que parte de ACOMP_INI (% da obra já pronta na
+// assinatura) e chega a 100% na entrega. Cobra os MESES-1 meses de obra; retorna os juros do mês 1 ao MESES-1.
+const ACOMP_INI = 0.35;
+function jurosAcompObra(cef) {
+  const inc = (1 - ACOMP_INI) / MESES;
+  let saldo = cef * ACOMP_INI;
+  const j = [];
+  for (let m = 1; m < MESES; m++) {
+    j[m] = saldo * 0.008;
+    saldo = cef * Math.min(ACOMP_INI + inc*m, 1);
+  }
+  return j;
 }
 var _valAnterior = 0;
 
@@ -981,14 +995,15 @@ function calc() {
     }
   }
 
-  let totMF=0,totAc=0,ac1=0,ac30=0;
-  const incC=(1-0.30)/30; let sC=cef*0.30;
+  let totMF=0,totAc=0;
+  const acJuros=jurosAcompObra(cef);
+  const ac1=acJuros[1]||0, ac30=acJuros[MESES-1]||0;
   const fluxoF=new Array(41).fill(0);
   fluxoF[0]=-(entF+custosF_total);
   for(let m=1;m<=40;m++){
-    const corrF=m<=30?Math.pow(1+incc,m):Math.pow(1+incc,30)*Math.pow(1+igpm,m-30);
+    const corrF=m<=MESES?Math.pow(1+incc,m):Math.pow(1+incc,MESES)*Math.pow(1+igpm,m-MESES);
     const pF=parcFin*corrF; totMF+=pF; fluxoF[m]-=pF;
-    if(m<=30){const j=sC*0.008;if(m===1)ac1=j;if(m===30)ac30=j;totAc+=j;fluxoF[m]-=j;sC=cef*Math.min(0.30+incC*m,1);}
+    const jAc=acJuros[m]||0; totAc+=jAc; fluxoF[m]-=jAc;
   }
   fluxoF[40]+=vE-cef;
   const totF=entF+custosF_total+totMF+totAc;
@@ -1129,12 +1144,13 @@ function enviarWhats() {
   // Financiado (entrada e parcela da construtora conforme editado no simulador)
   const { entF, parcFin, cef: cefW } = finParams(val);
   const custosF_w=545+val*0.003+1000+val*0.75*0.00021*30+val*0.000034*30;
-  const incC=(1-0.30)/30; let sC=cefW*0.30,totMF=0,totAc=0;
+  let totMF=0,totAc=0;
+  const acJurosW=jurosAcompObra(cefW);
   const fFw=new Array(41).fill(0); fFw[0]=-(entF+custosF_w);
   for(let m=1;m<=40;m++){
-    const corrF=m<=30?Math.pow(1+incc,m):Math.pow(1+incc,30)*Math.pow(1+igpm,m-30);
+    const corrF=m<=MESES_w?Math.pow(1+incc,m):Math.pow(1+incc,MESES_w)*Math.pow(1+igpm,m-MESES_w);
     const pF=parcFin*corrF; totMF+=pF; fFw[m]-=pF;
-    if(m<=30){const j=sC*0.008; totAc+=j; fFw[m]-=j; sC=cefW*Math.min(0.30+incC*m,1);}
+    const jAc=acJurosW[m]||0; totAc+=jAc; fFw[m]-=jAc;
   }
   fFw[40]+=vE-cefW;
   const totF_w=entF+custosF_w+totMF+totAc;
@@ -1194,20 +1210,20 @@ function enviarWhatsFin() {
   const { entPct: entFPct, entF, parcFin, bancoPct: bancoPctCalc, cef: cefCalc } = finParams(val);
   const custosF_total=545+val*0.003+1000+val*0.75*0.00021*30+val*0.000034*30;
 
-  const incC=(1-0.30)/30; let sC=cefCalc*0.30,totMF=0,totAc=0;
+  let totMF=0,totAc=0;
+  const acJurosC=jurosAcompObra(cefCalc);
   const fFw=new Array(41).fill(0); fFw[0]=-(entF+custosF_total);
   for(let m=1;m<=40;m++){
-    const corrF=m<=30?Math.pow(1+incc,m):Math.pow(1+incc,30)*Math.pow(1+igpm,m-30);
+    const corrF=m<=MESES?Math.pow(1+incc,m):Math.pow(1+incc,MESES)*Math.pow(1+igpm,m-MESES);
     const pF=parcFin*corrF; totMF+=pF; fFw[m]-=pF;
-    if(m<=30){const j=sC*0.008; totAc+=j; fFw[m]-=j; sC=cefCalc*Math.min(0.30+incC*m,1);}
+    const jAc=acJurosC[m]||0; totAc+=jAc; fFw[m]-=jAc;
   }
   fFw[40]+=vE-cefCalc;
   const lucF=Math.round(fFw.reduce((a,b)=>a+b,0));
   const bancoLabel=Math.round(bancoPctCalc*100);
   const parcF=parcFin;
 
-  const acomp1=Math.round(cefCalc*0.30*0.008);
-  const acomp2=Math.round(cefCalc*0.008);
+  const acomp1=Math.round(acJurosC[1]||0);
   const msg=saudacao+"fiz uma simulação para você ter uma ideia de como funciona a compra de uma unidade financiada pela Caixa.\n\n"
     +"*Valor do imóvel:* "+Rsmart(val)+"\n\n"
     +"*Entrada:* aproximadamente "+Math.round(entFPct*100)+"%, em 4 parcelas de "+Rsmart(entF/4)+"\n\n"
